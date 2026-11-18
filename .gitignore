@@ -1,0 +1,31 @@
+# Python cache and virtual environment
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# local credentials and environment variables
+.env
+
+# nextflow stuff, like temporal files and cache
+work/
+.nextflow/
+.nextflow.log*
+trace-*.txt*
+report-*.html*
+timeline-*.html*
+
+# Logs and outputs
+*.log
+data/runs/*
+!data/runs/.gitkeep
+
+# Heavy genomic files
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+*.bam
+*.bai
