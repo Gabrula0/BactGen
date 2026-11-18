@@ -29,3 +29,17 @@ data/runs/*
 *.fq.gz
 *.bam
 *.bai
+
+# Reference genomes and alignment indexes
+data/reference/*
+!data/reference/.gitkeep
+*.fa
+*.fasta
+*.fna
+*.fai
+*.mmi
+*.amb
+*.ann
+*.bwt
+*.pac
+*.sa
