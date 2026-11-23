@@ -1,0 +1,81 @@
+body {
+  background-color: #FEF1F5;
+  color: #1B011E;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.bactgen-header {
+  background-color: #1B011E;
+  color: #FEF1F5;
+}
+
+.bactgen-logo {
+  background: linear-gradient(135deg, #F9A8D4, #C084FC);
+  color: #1B011E;
+}
+
+.bactgen-card {
+  background-color: #FFFFFF;
+  border: 1px solid #F3D0DF;
+  border-radius: 1rem;
+  box-shadow: 0 4px 16px rgba(27, 1, 30, 0.05);
+}
+
+.bactgen-input {
+  background-color: #FFF9FB;
+  border: 1px solid #E9B8CE;
+  color: #1B011E;
+}
+
+.bactgen-input:focus {
+  outline: none;
+  border-color: #9D174D;
+  box-shadow: 0 0 0 3px rgba(244, 114, 182, 0.25);
+}
+
+.bactgen-dropzone {
+  border: 2px dashed #D8A4BC;
+  background-color: #FFF9FB;
+  transition: all 0.15s ease;
+}
+
+.bactgen-dropzone:hover,
+.bactgen-dropzone.drag-active {
+  border-color: #831843;
+  background-color: #FCE7F3;
+}
+
+.btn-plum {
+  background-color: #1B011E;
+  color: #FEF1F5;
+  transition: opacity 0.15s ease;
+}
+
+.btn-plum:hover {
+  opacity: 0.9;
+}
+
+.btn-plum:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sample-row-active {
+  background-color: #FCE7F3;
+}
+
+.btn-gradient {
+  background: linear-gradient(135deg, #831843, #4C1D95);
+  color: #FEF1F5;
+  font-weight: 600;
+  transition: opacity 0.15s ease;
+}
+
+.btn-gradient:hover {
+  opacity: 0.92;
+}
+
+.btn-gradient:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

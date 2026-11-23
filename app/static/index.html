@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BactGen - Clinical Genomics & Outbreak Surveillance</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <header class="bactgen-header">
+    <div class="max-w-6xl mx-auto px-5 py-3.5 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <img src="/static/bacterias.png" alt="BactGen" class="w-7 h-7 object-contain rounded-md" />
+        <span class="bactgen-logo px-2.5 py-1 rounded font-black text-sm">BactGen</span>
+        <span class="text-sm opacity-85 hidden sm:inline">WGS Pipeline & Outbreak Surveillance</span>
+      </div>
+      <div class="flex items-center gap-4 text-xs">
+        <span id="header-badge" class="px-3 py-1 rounded-full font-semibold bg-white/10">Checking...</span>
+        <a href="/docs" target="_blank" class="text-purple-200 hover:underline font-medium">API Docs</a>
+      </div>
+    </div>
+  </header>
+
+  <div id="toast" class="hidden max-w-6xl w-full mx-auto px-5 mt-4">
+    <div id="toast-msg" class="px-4 py-3 rounded-lg text-sm font-medium border"></div>
+  </div>
+
+  <main class="max-w-6xl w-full mx-auto px-5 py-6 space-y-5">
+
+    <section class="bactgen-card overflow-hidden">
+      <div class="px-5 py-3.5 border-b border-pink-100 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <h2 class="text-sm font-bold">Database Samples</h2>
+          <span id="sample-count" class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-pink-100 text-fuchsia-950">0 samples</span>
+        </div>
+        <div class="flex items-center gap-3">
+          <span id="selected-sample-label" class="text-xs font-semibold text-fuchsia-900">Active sample: None</span>
+          <button type="button" onclick="loadSamples()" class="text-xs px-3 py-1.5 rounded-lg bg-pink-100/80 hover:bg-pink-100 font-semibold">
+            Refresh
+          </button>
+        </div>
+      </div>
+      <div class="overflow-x-auto max-h-[34rem]">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-pink-50/70 text-xs uppercase opacity-70 border-b border-pink-100">
+            <tr>
+              <th class="px-5 py-2.5">Sample ID</th>
+              <th class="px-5 py-2.5">Organism</th>
+              <th class="px-5 py-2.5">Hospital Ward</th>
+              <th class="px-5 py-2.5">Source</th>
+              <th class="px-5 py-2.5">Collection Date</th>
+              <th class="px-5 py-2.5 text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody id="samples-tbody" class="divide-y divide-pink-100/80"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Genomic Results Panel (loaded on demand from SUCCESS analyses) -->
+    <section id="genomic-results-panel" class="hidden bactgen-card p-5 space-y-4 border-2 border-fuchsia-300">
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-pink-100 pb-3">
+        <div>
+          <span class="text-xs font-bold uppercase tracking-wider text-fuchsia-800">Genomic Analysis Report</span>
+          <h3 id="results-title" class="text-base font-bold">Analysis Results</h3>
+        </div>
+        <div class="flex items-center gap-2">
+          <span id="results-qc-badge" class="px-2.5 py-1 rounded-full text-xs font-bold"></span>
+          <button type="button" onclick="closeResultsPanel()"
+            class="px-3 py-1 rounded-lg text-xs font-semibold bg-pink-100/80 hover:bg-pink-100">
+            Close
+          </button>
+        </div>
+      </div>
+
+      <div id="results-kpis" class="grid grid-cols-2 sm:grid-cols-4 gap-3"></div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="bg-pink-50/50 rounded-xl border border-pink-200 p-4 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold uppercase opacity-75">MLST Typing</span>
+            <span id="results-mlst-st" class="px-2.5 py-0.5 rounded-full text-xs font-bold btn-plum">-</span>
+          </div>
+          <div id="results-mlst-alleles" class="flex flex-wrap gap-1.5 pt-1 text-xs font-mono"></div>
+        </div>
+
+        <div class="bg-pink-50/50 rounded-xl border border-pink-200 p-4 space-y-2">
+          <span class="text-xs font-bold uppercase opacity-75">Output Files</span>
+          <div id="results-paths" class="space-y-1 text-xs font-mono break-all opacity-85"></div>
+        </div>
+      </div>
+
+      <div class="space-y-2">
+        <div class="text-xs font-bold uppercase opacity-75">Antimicrobial Resistance (AMR) Genes</div>
+        <div id="results-amr-box" class="overflow-x-auto"></div>
+      </div>
+    </section>
+
+    <div class="flex items-center justify-between">
+      <button type="button" id="toggle-drawer-btn" onclick="toggleAddDrawer()"
+        class="btn-plum px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 shadow-sm">
+        <span id="drawer-icon">+</span>
+        <span>Add a Sample & Sequencing Run</span>
+      </button>
+      <span class="text-xs opacity-65 hidden sm:inline">Expand to register sample metadata and link FASTQ sequencing runs</span>
+    </div>
+    <section id="add-sample-drawer" class="hidden grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+      <div class="bactgen-card p-5">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-xs font-bold uppercase tracking-wider text-fuchsia-800">Step 1</span>
+          <button type="button" onclick="clearSampleForm()" class="text-[11px] opacity-60 hover:opacity-100 underline">Clear fields</button>
+        </div>
+        <h3 class="text-base font-bold mb-1">Sample ID & Clinical Metadata</h3>
+        <p class="text-xs opacity-65 mb-4">Creates the isolate record in PostgreSQL.</p>
+        <form id="sample-form" class="space-y-3">
+          <div>
+            <label class="block text-xs font-medium opacity-80">Sample ID *</label>
+            <input id="f-sample-id" required placeholder="DRR107086" class="bactgen-input mt-1 w-full rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium opacity-80">Organism *</label>
+            <input id="f-organism" required value="Staphylococcus aureus" class="bactgen-input mt-1 w-full rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium opacity-80">Collection Date *</label>
+              <input id="f-date" type="date" required value="2026-11-22" class="bactgen-input mt-1 w-full rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium opacity-80">Sample Source</label>
+              <input id="f-source" placeholder="blood" class="bactgen-input mt-1 w-full rounded-lg px-3 py-2 text-sm" />
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-medium opacity-80">Hospital Ward</label>
+            <input id="f-ward" placeholder="ICU-Adults" class="bactgen-input mt-1 w-full rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <button type="submit" id="save-sample-btn" class="btn-plum w-full font-semibold py-2.5 rounded-lg text-sm">
+            Save Sample Metadata
+          </button>
+        </form>
+      </div>
+
+      <div class="bactgen-card p-5 flex flex-col justify-between space-y-4">
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs font-bold uppercase tracking-wider text-fuchsia-800">Step 2</span>
+            <span id="step2-target-badge" class="text-xs font-mono font-bold text-fuchsia-900">Target: None</span>
+          </div>
+          <h3 class="text-base font-bold mb-1">Link FASTQ & Sequencing Run</h3>
+          <p class="text-xs opacity-65 mb-3">Attach paired-end FASTQ reads to the active sample.</p>
+          <div class="flex gap-2 text-xs mb-3">
+            <button type="button" onclick="setFastqMode('drop')" id="mode-drop"
+              class="flex-1 py-1.5 rounded-md font-semibold bg-pink-100/80 text-fuchsia-950 border border-pink-300">
+              Drag & Drop / Browse
+            </button>
+            <button type="button" onclick="setFastqMode('disk')" id="mode-disk"
+              class="flex-1 py-1.5 rounded-md font-semibold bg-white text-slate-600 border border-pink-200">
+              Server Folder (data/fastq/)
+            </button>
+          </div>
+          <div id="fastq-drop-panel" class="space-y-3">
+            <label for="fastq-input" id="fastq-dropzone" class="bactgen-dropzone block rounded-xl p-4 text-center cursor-pointer select-none">
+              <input id="fastq-input" type="file" multiple accept=".gz,.fastq,.fq" class="hidden" />
+              <p class="text-xs font-bold">Drop R1 and R2 (.fastq.gz) here</p>
+              <p class="text-[11px] opacity-65 mt-1">or click here to browse files from your computer</p>
+            </label>
+            <div id="fastq-staged-box" class="hidden space-y-2 bg-pink-50/70 p-3 rounded-lg border border-pink-200">
+              <div id="fastq-staged-list" class="space-y-1.5"></div>
+              <div class="flex justify-between items-center pt-1">
+                <button type="button" id="swap-r1r2-btn" onclick="swapR1R2()" class="hidden text-[11px] font-semibold text-fuchsia-900 underline">Swap R1 / R2</button>
+                <button type="button" onclick="clearFastqFiles()" class="text-[11px] text-rose-700 underline ml-auto">Remove files</button>
+              </div>
+            </div>
+            <button type="button" id="upload-fastq-btn" onclick="submitFastqUpload()" class="btn-plum w-full font-semibold py-2.5 rounded-lg text-sm">
+              Upload FASTQ & Create Sequencing Run
+            </button>
+          </div>
+          <div id="fastq-disk-panel" class="hidden space-y-3">
+            <div>
+              <label class="block text-xs font-medium opacity-80">FASTQ R1 (data/fastq/) *</label>
+              <select id="disk-r1-select" class="bactgen-input mt-1 w-full rounded-lg px-2.5 py-2 text-xs font-mono"></select>
+            </div>
+            <div>
+              <label class="block text-xs font-medium opacity-80">FASTQ R2 (optional)</label>
+              <select id="disk-r2-select" class="bactgen-input mt-1 w-full rounded-lg px-2.5 py-2 text-xs font-mono"></select>
+            </div>
+            <button type="button" onclick="submitDiskFastq()" class="btn-plum w-full font-semibold py-2.5 rounded-lg text-sm">
+              Link Existing Files & Create Run
+            </button>
+          </div>
+        </div>
+        <div class="border-t border-pink-100 pt-3">
+          <div class="text-xs font-bold uppercase opacity-65 mb-2">Linked Sequencing Runs</div>
+          <div id="linked-runs-list" class="space-y-1.5 text-xs">
+            <span class="opacity-60">Select a sample to view its runs.</span>
+          </div>
+        </div>
+
+        <div class="border-t border-pink-100 pt-3 space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold uppercase opacity-75">Run Analysis (Reference FASTA)</span>
+            <div class="flex gap-1.5 text-[11px]">
+              <button type="button" onclick="setRefMode('server')" id="ref-mode-server"
+                class="px-2.5 py-0.5 rounded bg-pink-100 text-fuchsia-950 font-semibold border border-pink-300">
+                Server
+              </button>
+              <button type="button" onclick="setRefMode('upload')" id="ref-mode-upload"
+                class="px-2.5 py-0.5 rounded bg-white text-slate-600 border border-pink-200">
+                Upload FASTA
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-medium opacity-80">Sequencing Run *</label>
+            <select id="analysis-run-select" class="bactgen-input mt-1 w-full rounded-lg px-2.5 py-2 text-xs font-mono">
+              <option value="">No sequencing run linked yet</option>
+            </select>
+          </div>
+
+          <div id="ref-server-panel">
+            <label class="block text-xs font-medium opacity-80">Server Reference Genome *</label>
+            <select id="ref-server-select" class="bactgen-input mt-1 w-full rounded-lg px-2.5 py-2 text-xs font-mono"></select>
+          </div>
+
+          <div id="ref-upload-panel" class="hidden space-y-2">
+            <label for="ref-file-input" id="ref-dropzone"
+              class="bactgen-dropzone block rounded-xl p-3 text-center cursor-pointer select-none">
+              <input id="ref-file-input" type="file" accept=".fasta,.fa,.fna" class="hidden" />
+              <p class="text-xs font-bold">Drop or click to choose reference file</p>
+              <p class="text-[11px] opacity-70 mt-0.5">Must be in FASTA format (.fasta, .fa, .fna)</p>
+              <div id="ref-staged-label" class="mt-1 text-xs font-mono font-bold text-fuchsia-900"></div>
+            </label>
+            <button type="button" id="upload-ref-btn" onclick="submitReferenceUpload()"
+              class="btn-plum w-full py-2 rounded-lg text-xs font-semibold">
+              Upload Reference FASTA
+            </button>
+          </div>
+
+          <button type="button" id="launch-analysis-btn" onclick="submitAnalysis()"
+            class="btn-gradient w-full py-2.5 rounded-lg text-sm shadow-sm">
+            Launch Analysis
+          </button>
+        </div>
+      </div>
+
+    </section>
+
+
+    <!-- Outbreak Surveillance: Clusters & Pairwise SNP Distances -->
+    <section class="bactgen-card p-5 space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-pink-100 pb-3">
+        <div>
+          <span class="text-xs font-bold uppercase tracking-wider text-fuchsia-800">Outbreak Surveillance</span>
+          <h2 class="text-base font-bold">SNP Distances & Cluster Detection</h2>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+          <label for="snp-threshold-input" class="font-semibold opacity-80">Max SNPs:</label>
+          <input id="snp-threshold-input" type="number" min="0" max="500" value="20"
+            class="bactgen-input w-20 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold" />
+          <button type="button" onclick="loadOutbreakSurveillance()"
+            class="btn-plum px-3.5 py-1.5 rounded-lg text-xs font-semibold">
+            Update Clusters & SNPs
+          </button>
+        </div>
+      </div>
+
+      <div class="space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold uppercase opacity-75">Detected Clusters</span>
+          <span id="clusters-summary" class="text-xs font-semibold text-fuchsia-900">Loading...</span>
+        </div>
+        <div id="clusters-grid" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+      </div>
+
+      <div class="space-y-2 pt-2 border-t border-pink-100">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold uppercase opacity-75">Pairwise SNP Distances</span>
+          <span id="distances-count" class="text-xs opacity-70">0 pairs</span>
+        </div>
+        <div class="overflow-x-auto max-h-64 border border-pink-100 rounded-xl">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-pink-50/70 uppercase opacity-70 border-b border-pink-100">
+              <tr>
+                <th class="px-4 py-2.5">Sample A</th>
+                <th class="px-4 py-2.5">Sample B</th>
+                <th class="px-4 py-2.5">SNP Distance</th>
+                <th class="px-4 py-2.5">Shared SNPs</th>
+                <th class="px-4 py-2.5">Reference Genome</th>
+              </tr>
+            </thead>
+            <tbody id="distances-tbody" class="divide-y divide-pink-100/80"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="/static/app.js?v=results-outbreaks"></script>
+</body>
+</html>

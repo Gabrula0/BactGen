@@ -6,10 +6,10 @@ __pycache__/
 *$py.class
 .pytest_cache/
 
-# local credentials and environment variables
+# Local credentials and environment variables
 .env
 
-# nextflow stuff, like temporal files and cache
+# Nextflow temporal files and cache
 work/
 .nextflow/
 .nextflow.log*
@@ -17,15 +17,28 @@ trace-*.txt*
 report-*.html*
 timeline-*.html*
 
-# Logs and outputs
+# Logs and pipeline run outputs
 *.log
 data/runs/*
 !data/runs/.gitkeep
 
-# Heavy genomic files
+# Heavy sequencing and alignment files (keep folder structure via .gitkeep)
+data/fastq/*
+!data/fastq/.gitkeep
 *.fastq
 *.fastq.gz
 *.fq
 *.fq.gz
 *.bam
 *.bai
+
+# Reference genome alignment indexes (keep .fasta / .fa / .fna tracked)
+*.fai
+*.mmi
+*.amb
+*.ann
+*.bwt
+*.pac
+*.sa
+*.dict
+*.bt2

@@ -1,14 +1,14 @@
--- 1. Metadatos clínicos de la muestra
+--Metadata of the sample
 CREATE TABLE samples (
     sample_id        VARCHAR(50) PRIMARY KEY,
     organism         VARCHAR(100) NOT NULL,
     collection_date  DATE NOT NULL,
     hospital_ward    VARCHAR(100),
-    sample_source    VARCHAR(50),  -- Ej: sangre, orina, frotis rectal
+    sample_source    VARCHAR(50),  -- Example: blood, urine, wound, etc.
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 2. Trazabilidad de archivos FASTQ de entrada
+-- Tracking of sequencing runs and associated FASTQ files
 CREATE TABLE sequencing_runs (
     run_id           SERIAL PRIMARY KEY,
     sample_id        VARCHAR(50) NOT NULL REFERENCES samples(sample_id) ON DELETE CASCADE,
@@ -19,7 +19,7 @@ CREATE TABLE sequencing_runs (
     uploaded_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 3. Orquestación, máquina de estados y auditoría de ejecución Nextflow
+-- organization of bioinformatics analysis runs
 CREATE TABLE analysis_runs (
     analysis_id       SERIAL PRIMARY KEY,
     run_id            INT NOT NULL REFERENCES sequencing_runs(run_id) ON DELETE CASCADE,
@@ -39,7 +39,7 @@ CREATE TABLE analysis_runs (
     error_message     TEXT
 );
 
--- 4. Resultados bioinformáticos (QC + Mapeo/Variantes + Tipado/AMR)
+-- 4. results of the bioinformatics analysis, including QC, mapping, variant calling, MLST, and AMR detection
 CREATE TABLE genomic_results (
     result_id           SERIAL PRIMARY KEY,
     analysis_id         INT UNIQUE NOT NULL REFERENCES analysis_runs(analysis_id) ON DELETE CASCADE,
@@ -64,7 +64,7 @@ CREATE TABLE genomic_results (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 5. Distancias genéticas por parejas para vigilancia de brotes
+-- distances between pairs of samples based on SNPs, for phylogenetic analysis and outbreak investigation
 CREATE TABLE pairwise_distances (
     distance_id       SERIAL PRIMARY KEY,
     sample_a_id       VARCHAR(50) NOT NULL REFERENCES samples(sample_id) ON DELETE CASCADE,
@@ -79,7 +79,7 @@ CREATE TABLE pairwise_distances (
     CONSTRAINT unique_sample_ref_pair UNIQUE (sample_a_id, sample_b_id, reference_genome)
 );
 
--- Índices para consultas rápidas en la API
+-- indexes to optimize queries on frequently accessed columns
 CREATE INDEX idx_sequencing_sample ON sequencing_runs(sample_id);
 CREATE INDEX idx_analysis_status ON analysis_runs(status);
 CREATE INDEX idx_analysis_reference ON analysis_runs(reference_genome);
