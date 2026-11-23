@@ -18,5 +18,13 @@ services:
       timeout: 5s
       retries: 5
 
+  pipeline-tools:
+    build:
+      context: .
+      dockerfile: pipeline/Dockerfile
+    image: bactgen-tools:1.0
+    profiles:
+      - tools
+
 volumes:
   postgres_data:

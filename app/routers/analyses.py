@@ -1,8 +1,8 @@
 from collections import defaultdict, deque
-from datetime import date
+from datetime import date, datetime
 import uuid
 from pathlib import Path
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -17,6 +17,20 @@ from app.schemas import (
 from app.services.pipeline_runner import execute_nextflow_analysis
 
 router = APIRouter(tags=["Analyses & Outbreak Surveillance"])
+
+REF_DIR = Path("data/reference")
+REF_EXTS = (".fasta", ".fa", ".fna")
+
+
+class AnalysisListItem(BaseModel):
+    analysis_id: int
+    run_id: int
+    sample_id: str
+    reference_genome: str
+    status: str
+    queued_at: datetime
+    finished_at: datetime | None
+    error_message: str | None
 
 
 class ClusterMember(BaseModel):
@@ -49,14 +63,14 @@ def _queue_analysis(
     if not seq_run:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"SequencingRun run_id={payload.run_id} no encontrado.",
+            detail=f"SequencingRun run_id={payload.run_id} not found.",
         )
 
     ref_file = Path(payload.reference_path)
     if not ref_file.is_file():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Genoma de referencia no encontrado en disco: {payload.reference_path}",
+            detail=f"Reference genome not found on disk: {payload.reference_path}",
         )
 
     nf_run_name = f"bactgen_{seq_run.sample_id}_{uuid.uuid4().hex[:8]}"
@@ -85,6 +99,68 @@ def _queue_analysis(
     return analysis
 
 
+@router.get("/analyses/available-references", response_model=list[str])
+def list_available_references():
+    if not REF_DIR.is_dir():
+        return []
+    return [
+        p.as_posix()
+        for p in sorted(REF_DIR.iterdir())
+        if p.is_file() and p.name.lower().endswith(REF_EXTS)
+    ]
+
+
+@router.post("/analyses/upload-reference", status_code=status.HTTP_201_CREATED)
+async def upload_reference_fasta(fasta_file: UploadFile = File(...)):
+    filename = Path(fasta_file.filename or "").name
+    if not filename.lower().endswith(REF_EXTS):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid format. Reference genome must be a FASTA file (.fasta, .fa, .fna).",
+        )
+
+    first_chunk = await fasta_file.read(1024 * 1024)
+    header_probe = first_chunk.lstrip(b"\xef\xbb\xbf \t\r\n")
+    if not header_probe.startswith(b">"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid FASTA content: file must start with a '>' sequence header.",
+        )
+
+    REF_DIR.mkdir(parents=True, exist_ok=True)
+    dest_path = REF_DIR / filename
+    with dest_path.open("wb") as out:
+        out.write(first_chunk)
+        while chunk := await fasta_file.read(1024 * 1024):
+            out.write(chunk)
+
+    return {"reference_path": dest_path.as_posix(), "filename": filename}
+
+
+@router.get("/analyses", response_model=list[AnalysisListItem])
+def list_analyses(limit: int = 50, db: Session = Depends(get_db)):
+    rows = (
+        db.query(AnalysisRun, SequencingRun.sample_id)
+        .join(SequencingRun, AnalysisRun.run_id == SequencingRun.run_id)
+        .order_by(AnalysisRun.queued_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        AnalysisListItem(
+            analysis_id=a.analysis_id,
+            run_id=a.run_id,
+            sample_id=sample_id,
+            reference_genome=a.reference_genome,
+            status=a.status,
+            queued_at=a.queued_at,
+            finished_at=a.finished_at,
+            error_message=a.error_message,
+        )
+        for a, sample_id in rows
+    ]
+
+
 @router.post("/analysis", response_model=AnalysisRunResponse, status_code=status.HTTP_202_ACCEPTED)
 def launch_analysis_singular(
     payload: AnalysisCreate,
@@ -109,7 +185,7 @@ def get_analysis_status(analysis_id: int, db: Session = Depends(get_db)):
     if not analysis:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Análisis analysis_id={analysis_id} no encontrado.",
+            detail=f"Analysis analysis_id={analysis_id} not found.",
         )
     return analysis
 
@@ -120,12 +196,12 @@ def get_analysis_results(analysis_id: int, db: Session = Depends(get_db)):
     if not analysis:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Análisis analysis_id={analysis_id} no encontrado.",
+            detail=f"Analysis analysis_id={analysis_id} not found.",
         )
     if analysis.status != "SUCCESS" or not analysis.genomic_result:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Resultados aún no disponibles (estado actual: {analysis.status}).",
+            detail=f"Results not ready yet (current status: {analysis.status}).",
         )
     return analysis.genomic_result
 
@@ -144,7 +220,7 @@ def list_pairwise_distances(
 
 @router.get("/clusters", response_model=ClustersResponse)
 def detect_outbreak_clusters(
-    max_snps: int = Query(default=20, ge=0, description="Umbral máximo de SNPs para agrupar muestras en un clúster"),
+    max_snps: int = Query(default=20, ge=0, description="Maximum SNP threshold to group samples into a cluster"),
     reference_genome: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
