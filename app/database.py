@@ -6,10 +6,12 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 load_dotenv()
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+psycopg2://BactGen:BactGen@127.0.0.1:5432/BactGenDB",
-)
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL environment variable is not set. "
+        "Define it in docker-compose.yml or in your local .env file."
+    )
 
 engine = create_engine(
     DATABASE_URL,

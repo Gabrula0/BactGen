@@ -113,10 +113,18 @@ def list_available_references():
 @router.post("/analyses/upload-reference", status_code=status.HTTP_201_CREATED)
 async def upload_reference_fasta(fasta_file: UploadFile = File(...)):
     filename = Path(fasta_file.filename or "").name
-    if not filename.lower().endswith(REF_EXTS):
+    if (
+        not filename
+        or filename.startswith("-")
+        or not re.fullmatch(r"[A-Za-z0-9._-]+", filename)
+        or not filename.lower().endswith(REF_EXTS)
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid format. Reference genome must be a FASTA file (.fasta, .fa, .fna).",
+            detail=(
+                "Invalid reference filename or format. Use a .fasta, .fa, or .fna file "
+                "with only letters, numbers, '.', '_' or '-'."
+            ),
         )
 
     first_chunk = await fasta_file.read(1024 * 1024)
@@ -129,10 +137,25 @@ async def upload_reference_fasta(fasta_file: UploadFile = File(...)):
 
     REF_DIR.mkdir(parents=True, exist_ok=True)
     dest_path = REF_DIR / filename
-    with dest_path.open("wb") as out:
-        out.write(first_chunk)
-        while chunk := await fasta_file.read(1024 * 1024):
-            out.write(chunk)
+    if dest_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Reference '{filename}' already exists. Use a unique versioned filename.",
+        )
+
+    try:
+        with dest_path.open("xb") as out:
+            out.write(first_chunk)
+            while chunk := await fasta_file.read(1024 * 1024):
+                out.write(chunk)
+    except FileExistsError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Reference '{filename}' already exists. Use a unique versioned filename.",
+        )
+    except Exception:
+        dest_path.unlink(missing_ok=True)
+        raise
 
     return {"reference_path": dest_path.as_posix(), "filename": filename}
 

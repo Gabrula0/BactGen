@@ -18,7 +18,7 @@
       </div>
       <div class="flex items-center gap-4 text-xs">
         <span id="header-badge" class="px-3 py-1 rounded-full font-semibold bg-white/10">Checking...</span>
-        <a href="/docs" target="_blank" class="text-purple-200 hover:underline font-medium">API Docs</a>
+        <a href="/docs" target="_blank" rel="noopener noreferrer" class="text-purple-200 hover:underline font-medium">API Docs</a>
       </div>
     </div>
   </header>
@@ -117,25 +117,25 @@
         <p class="text-xs opacity-65 mb-4">Creates the isolate record in PostgreSQL.</p>
         <form id="sample-form" class="space-y-3">
           <div>
-            <label class="block text-xs font-medium opacity-80">Sample ID *</label>
+            <label for="f-sample-id" class="block text-xs font-medium opacity-80">Sample ID *</label>
             <input id="f-sample-id" required placeholder="DRR107086" class="bactgen-input mt-1 w-full rounded-lg px-3 py-2 text-sm" />
           </div>
           <div>
-            <label class="block text-xs font-medium opacity-80">Organism *</label>
+            <label for="f-organism" class="block text-xs font-medium opacity-80">Organism *</label>
             <input id="f-organism" required value="Staphylococcus aureus" class="bactgen-input mt-1 w-full rounded-lg px-3 py-2 text-sm" />
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="block text-xs font-medium opacity-80">Collection Date *</label>
+              <label for="f-date" class="block text-xs font-medium opacity-80">Collection Date *</label>
               <input id="f-date" type="date" required value="2026-11-22" class="bactgen-input mt-1 w-full rounded-lg px-3 py-2 text-sm" />
             </div>
             <div>
-              <label class="block text-xs font-medium opacity-80">Sample Source</label>
+              <label for="f-source" class="block text-xs font-medium opacity-80">Sample Source</label>
               <input id="f-source" placeholder="blood" class="bactgen-input mt-1 w-full rounded-lg px-3 py-2 text-sm" />
             </div>
           </div>
           <div>
-            <label class="block text-xs font-medium opacity-80">Hospital Ward</label>
+            <label for="f-ward" class="block text-xs font-medium opacity-80">Hospital Ward</label>
             <input id="f-ward" placeholder="ICU-Adults" class="bactgen-input mt-1 w-full rounded-lg px-3 py-2 text-sm" />
           </div>
           <button type="submit" id="save-sample-btn" class="btn-plum w-full font-semibold py-2.5 rounded-lg text-sm">
@@ -181,11 +181,11 @@
           </div>
           <div id="fastq-disk-panel" class="hidden space-y-3">
             <div>
-              <label class="block text-xs font-medium opacity-80">FASTQ R1 (data/fastq/) *</label>
+              <label for="disk-r1-select" class="block text-xs font-medium opacity-80">FASTQ R1 (data/fastq/) *</label>
               <select id="disk-r1-select" class="bactgen-input mt-1 w-full rounded-lg px-2.5 py-2 text-xs font-mono"></select>
             </div>
             <div>
-              <label class="block text-xs font-medium opacity-80">FASTQ R2 (optional)</label>
+              <label for="disk-r2-select" class="block text-xs font-medium opacity-80">FASTQ R2 (optional)</label>
               <select id="disk-r2-select" class="bactgen-input mt-1 w-full rounded-lg px-2.5 py-2 text-xs font-mono"></select>
             </div>
             <button type="button" onclick="submitDiskFastq()" class="btn-plum w-full font-semibold py-2.5 rounded-lg text-sm">
@@ -216,14 +216,14 @@
           </div>
 
           <div>
-            <label class="block text-xs font-medium opacity-80">Sequencing Run *</label>
+            <label for="analysis-run-select" class="block text-xs font-medium opacity-80">Sequencing Run *</label>
             <select id="analysis-run-select" class="bactgen-input mt-1 w-full rounded-lg px-2.5 py-2 text-xs font-mono">
               <option value="">No sequencing run linked yet</option>
             </select>
           </div>
 
           <div id="ref-server-panel">
-            <label class="block text-xs font-medium opacity-80">Server Reference Genome *</label>
+            <label for="ref-server-select" class="block text-xs font-medium opacity-80">Server Reference Genome *</label>
             <select id="ref-server-select" class="bactgen-input mt-1 w-full rounded-lg px-2.5 py-2 text-xs font-mono"></select>
           </div>
 

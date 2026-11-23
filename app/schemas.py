@@ -1,15 +1,34 @@
+import re
 from datetime import date, datetime
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+SAMPLE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{1,49}$")
 
 
 # --- Samples & Sequencing Runs ---
 class SampleCreate(BaseModel):
-    sample_id: str = Field(..., min_length=2, max_length=50, examples=["DRR107085"])
+    sample_id: str = Field(
+        ...,
+        min_length=2,
+        max_length=50,
+        pattern=SAMPLE_ID_PATTERN.pattern,
+        examples=["DRR107085"],
+    )
     organism: str = Field(default="Staphylococcus aureus", max_length=100)
     collection_date: date = Field(..., examples=["2026-11-19"])
     hospital_ward: str | None = Field(None, max_length=100, examples=["UCI-Adultos"])
     sample_source: str | None = Field(None, max_length=50, examples=["blood"])
+
+    @field_validator("sample_id")
+    @classmethod
+    def validate_sample_id(cls, value: str) -> str:
+        if not SAMPLE_ID_PATTERN.match(value):
+            raise ValueError(
+                "sample_id must be 2-50 characters, start with an alphanumeric character, "
+                "and contain only letters, numbers, '.', '_' or '-'."
+            )
+        return value
 
 
 class SampleResponse(BaseModel):

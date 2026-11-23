@@ -2,9 +2,51 @@ let samplesList = [];
 let activeSampleId = null;
 let stagedFastqFiles = [];
 let stagedRefFile = null;
+const expandedSamples = new Set();
+let detailsPollTimer = null;
+const activePollingSamples = new Set();
+
+function syncDetailsPolling() {
+  Array.from(activePollingSamples).forEach(function (id) {
+    if (!expandedSamples.has(id)) {
+      activePollingSamples.delete(id);
+    }
+  });
+
+  if (activePollingSamples.size === 0) {
+    if (detailsPollTimer !== null) {
+      clearTimeout(detailsPollTimer);
+      detailsPollTimer = null;
+    }
+    return;
+  }
+
+  if (detailsPollTimer === null) {
+    detailsPollTimer = setTimeout(function () {
+      detailsPollTimer = null;
+      expandedSamples.forEach(function (id) {
+        loadSampleDetailsPanel(id);
+      });
+    }, 4000);
+  }
+}
+
 
 window.addEventListener("dragover", function (e) { e.preventDefault(); });
 window.addEventListener("drop", function (e) { e.preventDefault(); });
+
+function escapeHtml(value) {
+  const map = {
+    "&": "\u0026amp;",
+    "<": "\u0026lt;",
+    ">": "\u0026gt;",
+    '"': "\u0026quot;",
+    "'": "\u0026#39;"
+  };
+  return String(value ?? "").replace(/[&<>"']/g, function (ch) {
+    return map[ch];
+  });
+}
 
 function notify(text, isError) {
   const wrap = document.getElementById("toast");
@@ -96,6 +138,17 @@ async function selectSample(sampleId) {
   await loadLinkedRuns();
 }
 
+function statusBadgeHtml(status) {
+  const colors = {
+    SUCCESS: "bg-emerald-100 text-emerald-800 border-emerald-300",
+    RUNNING: "bg-amber-100 text-amber-800 border-amber-300 animate-pulse",
+    QUEUED: "bg-indigo-100 text-indigo-800 border-indigo-300",
+    FAILED: "bg-rose-100 text-rose-800 border-rose-300"
+  };
+  const cls = colors[status] || "bg-slate-100 text-slate-800 border-slate-300";
+  return '<span class="px-2 py-0.5 rounded-full text-[11px] font-bold border ' + cls + '">' + escapeHtml(status) + "</span>";
+}
+
 function renderSamplesTable() {
   const tbody = document.getElementById("samples-tbody");
   const counter = document.getElementById("sample-count");
@@ -105,30 +158,53 @@ function renderSamplesTable() {
   if (!total) {
     tbody.innerHTML =
       '<tr><td colspan="6" class="px-5 py-6 text-center text-xs opacity-60">' +
-      "No samples in database yet. Click '+ Add a Sample & Sequencing Run' below to register one." +
+      "No samples in database yet. Click Add a Sample below to register one." +
       "</td></tr>";
     return;
   }
 
   tbody.innerHTML = samplesList.map(function (s) {
-    const isSelected = s.sample_id === activeSampleId;
-    const rowClass = isSelected ? "sample-row-active" : "hover:bg-pink-50/50 cursor-pointer";
-    const btnClass = isSelected
-      ? "px-3 py-1 rounded-md text-xs font-bold btn-plum"
-      : "px-3 py-1 rounded-md text-xs font-semibold bg-white border border-pink-300 hover:bg-pink-50";
-    const btnText = isSelected ? "Selected" : "Select";
+    const id = s.sample_id;
+    const isSelected = id === activeSampleId;
+    const isOpen = expandedSamples.has(id);
+    const rowCls = isSelected ? "sample-row-active" : "hover:bg-pink-50/50 cursor-pointer";
+    const selCls = isSelected
+      ? "px-2.5 py-1 rounded-md text-xs font-bold btn-plum"
+      : "px-2.5 py-1 rounded-md text-xs font-semibold bg-white border border-pink-300 hover:bg-pink-50";
+    const expCls = isOpen
+      ? "px-2.5 py-1 rounded-md text-xs font-semibold bg-fuchsia-100 text-fuchsia-950 border border-fuchsia-300"
+      : "px-2.5 py-1 rounded-md text-xs font-semibold bg-pink-50 text-fuchsia-900 border border-pink-200 hover:bg-pink-100";
+    const expLabel = isOpen ? "Hide Runs" : "Runs & Analyses";
 
-    return (
-      '<tr data-id="' + s.sample_id + '" class="' + rowClass + '">' +
-      '<td class="px-5 py-3 font-mono font-bold text-xs">' + s.sample_id + "</td>" +
-      '<td class="px-5 py-3 text-xs italic">' + s.organism + "</td>" +
-      '<td class="px-5 py-3 text-xs">' + (s.hospital_ward || "-") + "</td>" +
-      '<td class="px-5 py-3 text-xs">' + (s.sample_source || "-") + "</td>" +
-      '<td class="px-5 py-3 text-xs">' + (s.collection_date || "-") + "</td>" +
-      '<td class="px-5 py-3 text-right"><button type="button" class="' + btnClass + '">' + btnText + "</button></td>" +
-      "</tr>"
-    );
+    const safeId = escapeHtml(id);
+    const safeOrganism = escapeHtml(s.organism || "-");
+    const safeWard = escapeHtml(s.hospital_ward || "-");
+    const safeSource = escapeHtml(s.sample_source || "-");
+    const safeDate = escapeHtml(s.collection_date || "-");
+
+    const mainRow =
+      '<tr data-id="' + safeId + '" class="' + rowCls + '">' +
+      '<td class="px-5 py-3 font-mono font-bold text-xs">' + safeId + "</td>" +
+      '<td class="px-5 py-3 text-xs italic">' + safeOrganism + "</td>" +
+      '<td class="px-5 py-3 text-xs">' + safeWard + "</td>" +
+      '<td class="px-5 py-3 text-xs">' + safeSource + "</td>" +
+      '<td class="px-5 py-3 text-xs">' + safeDate + "</td>" +
+      '<td class="px-5 py-3 text-right space-x-1.5 whitespace-nowrap">' +
+      '<button type="button" data-toggle-details="' + safeId + '" class="' + expCls + '">' + expLabel + "</button>" +
+      '<button type="button" class="' + selCls + '">' + (isSelected ? "Selected" : "Select") + "</button>" +
+      "</td></tr>";
+
+    const subRow = isOpen
+      ? '<tr class="bg-pink-50/40"><td colspan="6" id="details-box-' + safeId + '" class="px-6 py-4 border-t border-pink-100">' +
+        '<span class="text-xs opacity-65">Loading sequencing runs and analyses...</span></td></tr>'
+      : "";
+
+    return mainRow + subRow;
   }).join("");
+
+  expandedSamples.forEach(function (id) {
+    loadSampleDetailsPanel(id);
+  });
 }
 
 async function loadSamples(preferredId) {
@@ -154,43 +230,87 @@ async function loadSamples(preferredId) {
 async function loadLinkedRuns() {
   const container = document.getElementById("linked-runs-list");
   const runSel = document.getElementById("analysis-run-select");
+  const launchBtn = document.getElementById("launch-analysis-btn");
+
   if (!activeSampleId) {
     container.innerHTML = '<span class="opacity-60">Select or register a sample to view its sequencing runs.</span>';
-    if (runSel) runSel.innerHTML = '<option value="">Select a sample first</option>';
+    if (runSel) {
+      runSel.innerHTML = '<option value="">Select a sample first</option>';
+      runSel.disabled = true;
+    }
+    if (launchBtn) launchBtn.disabled = true;
     return;
   }
+
+  const requestedSampleId = activeSampleId;
+  const safeRequestedId = escapeHtml(requestedSampleId);
+
+  container.innerHTML = '<span class="opacity-60">Loading sequencing runs...</span>';
+  if (runSel) {
+    runSel.innerHTML = '<option value="">Loading sequencing runs...</option>';
+    runSel.disabled = true;
+  }
+  if (launchBtn) launchBtn.disabled = true;
+
   try {
-    const runs = await api("/samples/" + encodeURIComponent(activeSampleId) + "/sequencing-runs");
-    if (!runs.length) {
-      container.innerHTML = '<span class="opacity-60">No sequencing runs linked to ' + activeSampleId + ' yet.</span>';
-      if (runSel) runSel.innerHTML = '<option value="">No sequencing runs linked to ' + activeSampleId + " yet</option>";
+    const runs = await api("/samples/" + encodeURIComponent(requestedSampleId) + "/sequencing-runs");
+    if (requestedSampleId !== activeSampleId) {
       return;
     }
+
+    if (!runs.length) {
+      container.innerHTML = '<span class="opacity-60">No sequencing runs linked to ' + safeRequestedId + " yet.</span>";
+      if (runSel) {
+        runSel.innerHTML = '<option value="">No sequencing runs linked to ' + safeRequestedId + " yet</option>";
+        runSel.disabled = true;
+      }
+      if (launchBtn) launchBtn.disabled = true;
+      return;
+    }
+
     container.innerHTML = runs.map(function (r) {
-      const r1Name = r.fastq_r1_path.split("/").pop();
-      const r2Name = r.fastq_r2_path ? " + " + r.fastq_r2_path.split("/").pop() : " (single-end)";
+      const r1Name = escapeHtml((r.fastq_r1_path || "").split("/").pop());
+      const r2Name = r.fastq_r2_path
+        ? " + " + escapeHtml(r.fastq_r2_path.split("/").pop())
+        : " (single-end)";
+      const safeRunId = escapeHtml(r.run_id);
+      const safeMd5 = escapeHtml((r.fastq_r1_md5 || "").slice(0, 8));
       return (
         '<div class="bg-pink-50/70 border border-pink-200 rounded-lg px-3 py-2 flex justify-between items-center">' +
-        '<span class="font-mono font-semibold text-fuchsia-950">Run #' + r.run_id + ": " + r1Name + r2Name + "</span>" +
-        '<span class="text-[11px] opacity-65 font-mono">MD5: ' + r.fastq_r1_md5.slice(0, 8) + "...</span>" +
+        '<span class="font-mono font-semibold text-fuchsia-950">Run #' + safeRunId + ": " + r1Name + r2Name + "</span>" +
+        '<span class="text-[11px] opacity-65 font-mono">MD5: ' + safeMd5 + "...</span>" +
         "</div>"
       );
     }).join("");
+
     if (runSel) {
       runSel.innerHTML = runs.map(function (r) {
-        const name = r.fastq_r1_path.split("/").pop();
-        return '<option value="' + r.run_id + '">Run #' + r.run_id + " - " + name + "</option>";
+        const name = escapeHtml((r.fastq_r1_path || "").split("/").pop());
+        const safeRunId = escapeHtml(r.run_id);
+        return '<option value="' + safeRunId + '">Run #' + safeRunId + " - " + name + "</option>";
       }).join("");
+      runSel.disabled = false;
     }
+    if (launchBtn) launchBtn.disabled = false;
   } catch (err) {
-    container.innerHTML = '<span class="text-rose-700">Could not load runs.</span>';
+    if (requestedSampleId === activeSampleId) {
+      container.innerHTML = '<span class="text-rose-700">Could not load runs.</span>';
+      if (runSel) {
+        runSel.innerHTML = '<option value="">Could not load runs</option>';
+        runSel.disabled = true;
+      }
+      if (launchBtn) launchBtn.disabled = true;
+    }
   }
 }
 
 async function loadDiskFastqs() {
   try {
     const files = await api("/samples/available-fastq");
-    const opts = files.map(function (f) { return '<option value="' + f + '">' + f + "</option>"; }).join("");
+    const opts = files.map(function (f) {
+      const safeFile = escapeHtml(f);
+      return '<option value="' + safeFile + '">' + safeFile + "</option>";
+    }).join("");
     document.getElementById("disk-r1-select").innerHTML = opts || '<option value="">No FASTQ files in data/fastq/</option>';
     document.getElementById("disk-r2-select").innerHTML = '<option value="">-- None (Single-end) --</option>' + opts;
   } catch (err) {}
@@ -206,7 +326,8 @@ async function loadServerReferences(preferredPath) {
       return;
     }
     sel.innerHTML = refs.map(function (r) {
-      return '<option value="' + r + '">' + r + "</option>";
+      const safeRef = escapeHtml(r);
+      return '<option value="' + safeRef + '">' + safeRef + "</option>";
     }).join("");
     if (preferredPath && refs.includes(preferredPath)) {
       sel.value = preferredPath;
@@ -287,7 +408,7 @@ function renderStagedFastq() {
     const mb = (f.size / 1048576).toFixed(1);
     return (
       '<div class="text-xs font-mono text-fuchsia-950 bg-white px-2.5 py-1.5 rounded border border-pink-200 flex justify-between items-center">' +
-      "<span><strong>" + role + ":</strong> " + f.name + "</span>" +
+      "<span><strong>" + role + ":</strong> " + escapeHtml(f.name) + "</span>" +
       '<span class="opacity-60">' + mb + " MB</span></div>"
     );
   }).join("");
@@ -421,84 +542,11 @@ if (refInput) {
   });
 }
 
-document.getElementById("samples-tbody").addEventListener("click", function (e) {
-  const row = e.target.closest("tr[data-id]");
-  if (row) selectSample(row.getAttribute("data-id"));
-});
-
-checkDatabase();
-loadSamples(null);
-loadServerReferences(null);
-
-const expandedSamples = new Set();
-let detailsPollTimer = null;
-
-function statusBadgeHtml(status) {
-  const colors = {
-    SUCCESS: "bg-emerald-100 text-emerald-800 border-emerald-300",
-    RUNNING: "bg-amber-100 text-amber-800 border-amber-300 animate-pulse",
-    QUEUED: "bg-indigo-100 text-indigo-800 border-indigo-300",
-    FAILED: "bg-rose-100 text-rose-800 border-rose-300"
-  };
-  const cls = colors[status] || "bg-slate-100 text-slate-800 border-slate-300";
-  return '<span class="px-2 py-0.5 rounded-full text-[11px] font-bold border ' + cls + '">' + status + "</span>";
-}
-
-renderSamplesTable = function () {
-  const tbody = document.getElementById("samples-tbody");
-  const counter = document.getElementById("sample-count");
-  const total = samplesList.length;
-  counter.textContent = total + (total === 1 ? " sample" : " samples");
-
-  if (!total) {
-    tbody.innerHTML =
-      '<tr><td colspan="6" class="px-5 py-6 text-center text-xs opacity-60">' +
-      "No samples in database yet. Click Add a Sample below to register one." +
-      "</td></tr>";
-    return;
-  }
-
-  tbody.innerHTML = samplesList.map(function (s) {
-    const id = s.sample_id;
-    const isSelected = id === activeSampleId;
-    const isOpen = expandedSamples.has(id);
-    const rowCls = isSelected ? "sample-row-active" : "hover:bg-pink-50/50 cursor-pointer";
-    const selCls = isSelected
-      ? "px-2.5 py-1 rounded-md text-xs font-bold btn-plum"
-      : "px-2.5 py-1 rounded-md text-xs font-semibold bg-white border border-pink-300 hover:bg-pink-50";
-    const expCls = isOpen
-      ? "px-2.5 py-1 rounded-md text-xs font-semibold bg-fuchsia-100 text-fuchsia-950 border border-fuchsia-300"
-      : "px-2.5 py-1 rounded-md text-xs font-semibold bg-pink-50 text-fuchsia-900 border border-pink-200 hover:bg-pink-100";
-    const expLabel = isOpen ? "Hide Runs" : "Runs & Analyses";
-
-    const mainRow =
-      '<tr data-id="' + id + '" class="' + rowCls + '">' +
-      '<td class="px-5 py-3 font-mono font-bold text-xs">' + id + "</td>" +
-      '<td class="px-5 py-3 text-xs italic">' + s.organism + "</td>" +
-      '<td class="px-5 py-3 text-xs">' + (s.hospital_ward || "-") + "</td>" +
-      '<td class="px-5 py-3 text-xs">' + (s.sample_source || "-") + "</td>" +
-      '<td class="px-5 py-3 text-xs">' + (s.collection_date || "-") + "</td>" +
-      '<td class="px-5 py-3 text-right space-x-1.5 whitespace-nowrap">' +
-      '<button type="button" data-toggle-details="' + id + '" class="' + expCls + '">' + expLabel + "</button>" +
-      '<button type="button" class="' + selCls + '">' + (isSelected ? "Selected" : "Select") + "</button>" +
-      "</td></tr>";
-
-    const subRow = isOpen
-      ? '<tr class="bg-pink-50/40"><td colspan="6" id="details-box-' + id + '" class="px-6 py-4 border-t border-pink-100">' +
-        '<span class="text-xs opacity-65">Loading sequencing runs and analyses...</span></td></tr>'
-      : "";
-
-    return mainRow + subRow;
-  }).join("");
-
-  expandedSamples.forEach(function (id) {
-    loadSampleDetailsPanel(id);
-  });
-};
-
 async function loadSampleDetailsPanel(sampleId) {
   const box = document.getElementById("details-box-" + sampleId);
   if (!box) return;
+
+  const safeSampleId = escapeHtml(sampleId);
 
   try {
     const pair = await Promise.all([
@@ -513,15 +561,19 @@ async function loadSampleDetailsPanel(sampleId) {
     if (!runs.length) {
       box.innerHTML =
         '<div class="flex items-center justify-between text-xs bg-white rounded-xl border border-pink-200 px-4 py-3">' +
-        '<span class="opacity-70">No sequencing runs linked to <strong>' + sampleId + "</strong> yet.</span>" +
-        '<button type="button" data-refresh-details="' + sampleId + '" class="underline text-fuchsia-900 font-semibold">Refresh</button>' +
+        '<span class="opacity-70">No sequencing runs linked to <strong>' + safeSampleId + "</strong> yet.</span>" +
+        '<button type="button" data-refresh-details="' + safeSampleId + '" class="underline text-fuchsia-900 font-semibold">Refresh</button>' +
         "</div>";
+      activePollingSamples.delete(sampleId);
+      syncDetailsPolling();
       return;
     }
 
     const runsHtml = runs.map(function (run) {
-      const r1 = run.fastq_r1_path.split("/").pop();
-      const r2 = run.fastq_r2_path ? run.fastq_r2_path.split("/").pop() : "";
+      const r1 = escapeHtml((run.fastq_r1_path || "").split("/").pop());
+      const r2 = run.fastq_r2_path ? escapeHtml(run.fastq_r2_path.split("/").pop()) : "";
+      const safeRunId = escapeHtml(run.run_id);
+      const safeMd5 = escapeHtml((run.fastq_r1_md5 || "").slice(0, 10));
       const linkedAnalyses = sampleAnalyses.filter(function (a) {
         return a.run_id !== undefined ? a.run_id === run.run_id : true;
       });
@@ -530,15 +582,20 @@ async function loadSampleDetailsPanel(sampleId) {
         ? '<div class="mt-2.5 pt-2.5 border-t border-pink-100 space-y-1.5">' +
           '<div class="text-[11px] font-bold uppercase opacity-60">Analyses (' + linkedAnalyses.length + ")</div>" +
           linkedAnalyses.map(function (a) {
-            const refName = (a.reference_genome || "").split("/").pop();
+            const safeAnalysisId = escapeHtml(a.analysis_id);
+            const refName = escapeHtml((a.reference_genome || "").split("/").pop());
             const errMsg = a.status === "FAILED" && a.error_message
-              ? '<span class="text-[11px] text-rose-700 ml-2">' + a.error_message + "</span>"
+              ? '<span class="text-[11px] text-rose-700 ml-2">' + escapeHtml(a.error_message) + "</span>"
+              : "";
+            const viewBtn = a.status === "SUCCESS"
+              ? '<button type="button" data-view-results="' + safeAnalysisId + '" data-sample-id="' + safeSampleId + '" ' +
+                'class="px-2.5 py-0.5 rounded-md text-[11px] font-bold btn-plum">View Results</button>'
               : "";
             return (
               '<div class="flex flex-wrap items-center justify-between gap-2 bg-pink-50/70 rounded-lg px-3 py-1.5 text-xs">' +
-              '<div><span class="font-mono font-bold text-fuchsia-950">Analysis #' + a.analysis_id + "</span>" +
+              '<div><span class="font-mono font-bold text-fuchsia-950">Analysis #' + safeAnalysisId + "</span>" +
               '<span class="font-mono text-[11px] opacity-75 ml-2">Ref: ' + refName + "</span>" + errMsg + "</div>" +
-              "<div>" + statusBadgeHtml(a.status) + "</div></div>"
+              '<div class="flex items-center gap-2">' + viewBtn + statusBadgeHtml(a.status) + "</div></div>"
             );
           }).join("") + "</div>"
         : '<div class="mt-2 pt-2 border-t border-pink-100 text-[11px] opacity-60">No analyses executed for this sequencing run yet.</div>';
@@ -546,11 +603,11 @@ async function loadSampleDetailsPanel(sampleId) {
       return (
         '<div class="bg-white rounded-xl border border-pink-200 p-3.5 shadow-sm">' +
         '<div class="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">' +
-        '<div><span class="font-bold text-fuchsia-950">Sequencing Run #' + run.run_id + "</span>" +
+        '<div><span class="font-bold text-fuchsia-950">Sequencing Run #' + safeRunId + "</span>" +
         '<span class="ml-2 px-2 py-0.5 rounded bg-pink-100/80 text-fuchsia-950 font-semibold">R1: ' + r1 + "</span>" +
         (r2 ? '<span class="ml-1.5 px-2 py-0.5 rounded bg-purple-100/80 text-purple-950 font-semibold">R2: ' + r2 + "</span>" : "") +
         "</div>" +
-        '<span class="text-[11px] opacity-60">MD5: ' + (run.fastq_r1_md5 || "").slice(0, 10) + "...</span>" +
+        '<span class="text-[11px] opacity-60">MD5: ' + safeMd5 + "...</span>" +
         "</div>" + analysesBlock + "</div>"
       );
     }).join("");
@@ -558,18 +615,22 @@ async function loadSampleDetailsPanel(sampleId) {
     box.innerHTML =
       '<div class="space-y-2.5">' +
       '<div class="flex items-center justify-between">' +
-      '<span class="text-xs font-bold uppercase tracking-wider text-fuchsia-900">Sequencing Runs & Analyses for ' + sampleId + "</span>" +
-      '<button type="button" data-refresh-details="' + sampleId + '" class="text-[11px] font-semibold text-fuchsia-900 underline">Refresh</button>' +
+      '<span class="text-xs font-bold uppercase tracking-wider text-fuchsia-900">Sequencing Runs & Analyses for ' + safeSampleId + "</span>" +
+      '<button type="button" data-refresh-details="' + safeSampleId + '" class="text-[11px] font-semibold text-fuchsia-900 underline">Refresh</button>' +
       "</div>" + runsHtml + "</div>";
 
-    clearTimeout(detailsPollTimer);
-    if (sampleAnalyses.some(function (a) { return a.status === "QUEUED" || a.status === "RUNNING"; })) {
-      detailsPollTimer = setTimeout(function () {
-        expandedSamples.forEach(function (id) { loadSampleDetailsPanel(id); });
-      }, 4000);
+    const hasPending = sampleAnalyses.some(function (a) {
+      return a.status === "QUEUED" || a.status === "RUNNING";
+    });
+    if (hasPending) {
+      activePollingSamples.add(sampleId);
+    } else {
+      activePollingSamples.delete(sampleId);
     }
+    syncDetailsPolling();
   } catch (err) {
-    box.innerHTML = '<div class="text-xs text-rose-700">Error loading details: ' + err.message + "</div>";
+    box.innerHTML = '<div class="text-xs text-rose-700">Error loading details: ' + escapeHtml(err.message) + "</div>";
+    syncDetailsPolling();
   }
 }
 
@@ -586,12 +647,26 @@ document.getElementById("samples-tbody").addEventListener("click", function (e) 
     renderSamplesTable();
     return;
   }
+
   const refreshBtn = e.target.closest("[data-refresh-details]");
   if (refreshBtn) {
     e.stopPropagation();
     loadSampleDetailsPanel(refreshBtn.getAttribute("data-refresh-details"));
+    return;
   }
-}, true);
+
+  const resBtn = e.target.closest("[data-view-results]");
+  if (resBtn) {
+    e.stopPropagation();
+    openAnalysisResults(resBtn.getAttribute("data-view-results"), resBtn.getAttribute("data-sample-id"));
+    return;
+  }
+
+  const row = e.target.closest("tr[data-id]");
+  if (row) {
+    selectSample(row.getAttribute("data-id"));
+  }
+});
 
 function closeResultsPanel() {
   document.getElementById("genomic-results-panel").classList.add("hidden");
@@ -608,6 +683,8 @@ function fmtPct(val, isFraction) {
   return num.toFixed(1) + "%";
 }
 
+let activeResultsRequestId = 0;
+
 async function openAnalysisResults(analysisId, sampleId) {
   const panel = document.getElementById("genomic-results-panel");
   const title = document.getElementById("results-title");
@@ -618,14 +695,24 @@ async function openAnalysisResults(analysisId, sampleId) {
   const pathsBox = document.getElementById("results-paths");
   const amrBox = document.getElementById("results-amr-box");
 
+  const requestId = ++activeResultsRequestId;
+  const labelSuffix = sampleId ? " (" + sampleId + ")" : "";
+
   panel.classList.remove("hidden");
-  title.textContent = "Loading Analysis #" + analysisId + (sampleId ? " (" + sampleId + ")" : "") + "...";
+  title.textContent = "Loading Analysis #" + analysisId + labelSuffix + "...";
+  qcBadge.textContent = "LOADING";
+  qcBadge.className = "px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-300";
   kpis.innerHTML = "";
+  mlstSt.textContent = "-";
+  mlstAlleles.innerHTML = "";
+  pathsBox.innerHTML = "";
   amrBox.innerHTML = '<div class="text-xs opacity-65">Loading genomic results...</div>';
   panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
 
   try {
-    const r = await api("/analyses/" + analysisId + "/results");
+    const r = await api("/analyses/" + encodeURIComponent(analysisId) + "/results");
+    if (requestId !== activeResultsRequestId) return;
+
     title.textContent = "Analysis #" + r.analysis_id + (sampleId ? " - Sample " + sampleId : "");
 
     const pass = (r.qc_status || "").toUpperCase() === "PASS";
@@ -648,8 +735,8 @@ async function openAnalysisResults(analysisId, sampleId) {
     kpis.innerHTML = cards.map(function (c) {
       return (
         '<div class="bg-pink-50/60 border border-pink-200 rounded-xl p-3">' +
-        '<div class="text-[11px] uppercase opacity-65 font-semibold">' + c.label + "</div>" +
-        '<div class="text-sm font-mono font-bold text-fuchsia-950 mt-0.5">' + c.val + "</div>" +
+        '<div class="text-[11px] uppercase opacity-65 font-semibold">' + escapeHtml(c.label) + "</div>" +
+        '<div class="text-sm font-mono font-bold text-fuchsia-950 mt-0.5">' + escapeHtml(c.val) + "</div>" +
         "</div>"
       );
     }).join("");
@@ -659,20 +746,20 @@ async function openAnalysisResults(analysisId, sampleId) {
     const alleleKeys = Object.keys(alleles);
     mlstAlleles.innerHTML = alleleKeys.length
       ? alleleKeys.map(function (k) {
-          return '<span class="px-2 py-0.5 rounded bg-white border border-pink-200">' + k + ": <strong>" + alleles[k] + "</strong></span>";
+          return '<span class="px-2 py-0.5 rounded bg-white border border-pink-200">' + escapeHtml(k) + ": <strong>" + escapeHtml(alleles[k]) + "</strong></span>";
         }).join("")
       : '<span class="opacity-60">No MLST allele breakdown recorded.</span>';
 
     pathsBox.innerHTML =
-      "<div><strong>VCF:</strong> " + (r.vcf_path || "-") + "</div>" +
-      "<div><strong>Consensus:</strong> " + (r.consensus_path || "-") + "</div>";
+      "<div><strong>VCF:</strong> " + escapeHtml(r.vcf_path || "-") + "</div>" +
+      "<div><strong>Consensus:</strong> " + escapeHtml(r.consensus_path || "-") + "</div>";
 
     const genes = Array.isArray(r.resistance_genes) ? r.resistance_genes : [];
     if (!genes.length) {
       amrBox.innerHTML = '<div class="text-xs opacity-65 bg-pink-50/50 border border-pink-200 rounded-lg px-3 py-2.5">No antimicrobial resistance genes detected.</div>';
     } else if (typeof genes[0] === "string") {
       amrBox.innerHTML = '<div class="flex flex-wrap gap-1.5">' + genes.map(function (g) {
-        return '<span class="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-rose-100 text-rose-900 border border-rose-300">' + g + "</span>";
+        return '<span class="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-rose-100 text-rose-900 border border-rose-300">' + escapeHtml(g) + "</span>";
       }).join("") + "</div>";
     } else {
       amrBox.innerHTML =
@@ -681,10 +768,10 @@ async function openAnalysisResults(analysisId, sampleId) {
         '<tr><th class="px-3 py-2">Gene</th><th class="px-3 py-2">Resistance / Product</th><th class="px-3 py-2">Coverage</th><th class="px-3 py-2">Identity</th></tr></thead>' +
         '<tbody class="divide-y divide-pink-100">' +
         genes.map(function (g) {
-          const name = g.gene || g.GENE || g.name || "-";
-          const res = g.resistance || g.RESISTANCE || g.product || g.PRODUCT || "-";
-          const cov = g.coverage != null ? g.coverage + "%" : (g["%COVERAGE"] ? g["%COVERAGE"] + "%" : "-");
-          const idn = g.identity != null ? g.identity + "%" : (g["%IDENTITY"] ? g["%IDENTITY"] + "%" : "-");
+          const name = escapeHtml(g.gene || g.GENE || g.name || "-");
+          const res = escapeHtml(g.resistance || g.RESISTANCE || g.product || g.PRODUCT || "-");
+          const cov = escapeHtml(g.coverage != null ? g.coverage + "%" : (g["%COVERAGE"] ? g["%COVERAGE"] + "%" : "-"));
+          const idn = escapeHtml(g.identity != null ? g.identity + "%" : (g["%IDENTITY"] ? g["%IDENTITY"] + "%" : "-"));
           return (
             '<tr class="bg-white">' +
             '<td class="px-3 py-2 font-mono font-bold text-rose-900">' + name + "</td>" +
@@ -697,102 +784,18 @@ async function openAnalysisResults(analysisId, sampleId) {
         "</tbody></table>";
     }
   } catch (err) {
-    amrBox.innerHTML = '<div class="text-xs text-rose-700">' + err.message + "</div>";
+    if (requestId !== activeResultsRequestId) return;
+    title.textContent = "Failed to load Analysis #" + analysisId + labelSuffix;
+    qcBadge.textContent = "ERROR";
+    qcBadge.className = "px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-300";
+    amrBox.innerHTML = '<div class="text-xs text-rose-700">' + escapeHtml(err.message) + "</div>";
   }
 }
-
-loadSampleDetailsPanel = async function (sampleId) {
-  const box = document.getElementById("details-box-" + sampleId);
-  if (!box) return;
-
-  try {
-    const pair = await Promise.all([
-      api("/samples/" + encodeURIComponent(sampleId) + "/sequencing-runs"),
-      api("/analyses")
-    ]);
-    const runs = pair[0];
-    const sampleAnalyses = pair[1].filter(function (a) {
-      return a.sample_id === sampleId;
-    });
-
-    if (!runs.length) {
-      box.innerHTML =
-        '<div class="flex items-center justify-between text-xs bg-white rounded-xl border border-pink-200 px-4 py-3">' +
-        '<span class="opacity-70">No sequencing runs linked to <strong>' + sampleId + "</strong> yet.</span>" +
-        '<button type="button" data-refresh-details="' + sampleId + '" class="underline text-fuchsia-900 font-semibold">Refresh</button>' +
-        "</div>";
-      return;
-    }
-
-    const runsHtml = runs.map(function (run) {
-      const r1 = run.fastq_r1_path.split("/").pop();
-      const r2 = run.fastq_r2_path ? run.fastq_r2_path.split("/").pop() : "";
-      const linkedAnalyses = sampleAnalyses.filter(function (a) {
-        return a.run_id !== undefined ? a.run_id === run.run_id : true;
-      });
-
-      const analysesBlock = linkedAnalyses.length
-        ? '<div class="mt-2.5 pt-2.5 border-t border-pink-100 space-y-1.5">' +
-          '<div class="text-[11px] font-bold uppercase opacity-60">Analyses (' + linkedAnalyses.length + ")</div>" +
-          linkedAnalyses.map(function (a) {
-            const refName = (a.reference_genome || "").split("/").pop();
-            const errMsg = a.status === "FAILED" && a.error_message
-              ? '<span class="text-[11px] text-rose-700 ml-2">' + a.error_message + "</span>"
-              : "";
-            const viewBtn = a.status === "SUCCESS"
-              ? '<button type="button" data-view-results="' + a.analysis_id + '" data-sample-id="' + sampleId + '" ' +
-                'class="px-2.5 py-0.5 rounded-md text-[11px] font-bold btn-plum">View Results</button>'
-              : "";
-            return (
-              '<div class="flex flex-wrap items-center justify-between gap-2 bg-pink-50/70 rounded-lg px-3 py-1.5 text-xs">' +
-              '<div><span class="font-mono font-bold text-fuchsia-950">Analysis #' + a.analysis_id + "</span>" +
-              '<span class="font-mono text-[11px] opacity-75 ml-2">Ref: ' + refName + "</span>" + errMsg + "</div>" +
-              '<div class="flex items-center gap-2">' + viewBtn + statusBadgeHtml(a.status) + "</div></div>"
-            );
-          }).join("") + "</div>"
-        : '<div class="mt-2 pt-2 border-t border-pink-100 text-[11px] opacity-60">No analyses executed for this sequencing run yet.</div>';
-
-      return (
-        '<div class="bg-white rounded-xl border border-pink-200 p-3.5 shadow-sm">' +
-        '<div class="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">' +
-        '<div><span class="font-bold text-fuchsia-950">Sequencing Run #' + run.run_id + "</span>" +
-        '<span class="ml-2 px-2 py-0.5 rounded bg-pink-100/80 text-fuchsia-950 font-semibold">R1: ' + r1 + "</span>" +
-        (r2 ? '<span class="ml-1.5 px-2 py-0.5 rounded bg-purple-100/80 text-purple-950 font-semibold">R2: ' + r2 + "</span>" : "") +
-        "</div>" +
-        '<span class="text-[11px] opacity-60">MD5: ' + (run.fastq_r1_md5 || "").slice(0, 10) + "...</span>" +
-        "</div>" + analysesBlock + "</div>"
-      );
-    }).join("");
-
-    box.innerHTML =
-      '<div class="space-y-2.5">' +
-      '<div class="flex items-center justify-between">' +
-      '<span class="text-xs font-bold uppercase tracking-wider text-fuchsia-900">Sequencing Runs & Analyses for ' + sampleId + "</span>" +
-      '<button type="button" data-refresh-details="' + sampleId + '" class="text-[11px] font-semibold text-fuchsia-900 underline">Refresh</button>' +
-      "</div>" + runsHtml + "</div>";
-
-    clearTimeout(detailsPollTimer);
-    if (sampleAnalyses.some(function (a) { return a.status === "QUEUED" || a.status === "RUNNING"; })) {
-      detailsPollTimer = setTimeout(function () {
-        expandedSamples.forEach(function (id) { loadSampleDetailsPanel(id); });
-      }, 4000);
-    }
-  } catch (err) {
-    box.innerHTML = '<div class="text-xs text-rose-700">Error loading details: ' + err.message + "</div>";
-  }
-};
-
-document.getElementById("samples-tbody").addEventListener("click", function (e) {
-  const resBtn = e.target.closest("[data-view-results]");
-  if (resBtn) {
-    e.stopPropagation();
-    openAnalysisResults(resBtn.getAttribute("data-view-results"), resBtn.getAttribute("data-sample-id"));
-  }
-}, true);
 
 async function loadOutbreakSurveillance() {
   const input = document.getElementById("snp-threshold-input");
   const maxSnps = input ? Number(input.value || 20) : 20;
+  const safeMaxSnps = escapeHtml(maxSnps);
   const summary = document.getElementById("clusters-summary");
   const grid = document.getElementById("clusters-grid");
   const distCount = document.getElementById("distances-count");
@@ -800,8 +803,8 @@ async function loadOutbreakSurveillance() {
 
   try {
     const pair = await Promise.all([
-      api("/clusters?max_snps=" + maxSnps),
-      api("/outbreaks/distances?max_snps=" + maxSnps)
+      api("/clusters?max_snps=" + encodeURIComponent(maxSnps)),
+      api("/outbreaks/distances?max_snps=" + encodeURIComponent(maxSnps))
     ]);
     const clusterData = pair[0];
     const distances = pair[1];
@@ -812,23 +815,23 @@ async function loadOutbreakSurveillance() {
     if (!clusters.length) {
       grid.innerHTML =
         '<div class="md:col-span-2 bg-pink-50/50 border border-pink-200 rounded-xl p-4 text-xs opacity-70">' +
-        "No outbreak clusters detected within <= " + maxSnps + " SNPs. Try increasing the SNP threshold or running more samples against the same reference." +
+        "No outbreak clusters detected within <= " + safeMaxSnps + " SNPs. Try increasing the SNP threshold or running more samples against the same reference." +
         "</div>";
     } else {
       grid.innerHTML = clusters.map(function (c, idx) {
-        const cid = c.cluster_id != null ? c.cluster_id : (idx + 1);
+        const cid = escapeHtml(c.cluster_id != null ? c.cluster_id : (idx + 1));
         const members = c.samples || c.sample_ids || [];
-        const ref = (c.reference_genome || "").split("/").pop();
-        const maxDist = c.max_snp_distance != null ? "Max " + c.max_snp_distance + " SNPs" : "";
+        const ref = escapeHtml((c.reference_genome || "").split("/").pop());
+        const maxDist = c.max_snp_distance != null ? "Max " + escapeHtml(c.max_snp_distance) + " SNPs" : "";
         const badges = members.map(function (m) {
-          return '<span class="px-2 py-0.5 rounded bg-white border border-pink-300 font-mono font-bold text-xs text-fuchsia-950">' + m + "</span>";
+          return '<span class="px-2 py-0.5 rounded bg-white border border-pink-300 font-mono font-bold text-xs text-fuchsia-950">' + escapeHtml(m) + "</span>";
         }).join(" ");
 
         return (
           '<div class="bg-pink-50/60 border border-pink-200 rounded-xl p-4 space-y-2">' +
           '<div class="flex items-center justify-between text-xs">' +
           '<span class="font-bold text-fuchsia-950">Cluster #' + cid + " (" + members.length + " isolates)</span>" +
-          '<span class="px-2 py-0.5 rounded-full bg-rose-100 text-rose-900 font-bold text-[11px]">' + (maxDist || "<= " + maxSnps + " SNPs") + "</span>" +
+          '<span class="px-2 py-0.5 rounded-full bg-rose-100 text-rose-900 font-bold text-[11px]">' + (maxDist || "<= " + safeMaxSnps + " SNPs") + "</span>" +
           "</div>" +
           '<div class="flex flex-wrap gap-1.5">' + badges + "</div>" +
           (ref ? '<div class="text-[11px] font-mono opacity-65">Ref: ' + ref + "</div>" : "") +
@@ -841,20 +844,20 @@ async function loadOutbreakSurveillance() {
     if (!distances.length) {
       distBody.innerHTML =
         '<tr><td colspan="5" class="px-4 py-6 text-center opacity-60">' +
-        "No pairwise SNP distances found within <= " + maxSnps + " SNPs." +
+        "No pairwise SNP distances found within <= " + safeMaxSnps + " SNPs." +
         "</td></tr>";
     } else {
       distBody.innerHTML = distances.map(function (d) {
-        const ref = (d.reference_genome || "").split("/").pop();
+        const ref = escapeHtml((d.reference_genome || "").split("/").pop());
         const snpBadge = d.snp_distance <= 5
           ? "bg-rose-100 text-rose-900 border-rose-300"
           : "bg-amber-100 text-amber-900 border-amber-300";
         return (
           '<tr class="hover:bg-pink-50/40">' +
-          '<td class="px-4 py-2.5 font-mono font-bold">' + d.sample_a_id + "</td>" +
-          '<td class="px-4 py-2.5 font-mono font-bold">' + d.sample_b_id + "</td>" +
-          '<td class="px-4 py-2.5"><span class="px-2 py-0.5 rounded-full font-mono font-bold border ' + snpBadge + '">' + d.snp_distance + " SNPs</span></td>" +
-          '<td class="px-4 py-2.5 font-mono opacity-75">' + d.shared_snps + "</td>" +
+          '<td class="px-4 py-2.5 font-mono font-bold">' + escapeHtml(d.sample_a_id) + "</td>" +
+          '<td class="px-4 py-2.5 font-mono font-bold">' + escapeHtml(d.sample_b_id) + "</td>" +
+          '<td class="px-4 py-2.5"><span class="px-2 py-0.5 rounded-full font-mono font-bold border ' + snpBadge + '">' + escapeHtml(d.snp_distance) + " SNPs</span></td>" +
+          '<td class="px-4 py-2.5 font-mono opacity-75">' + escapeHtml(d.shared_snps) + "</td>" +
           '<td class="px-4 py-2.5 font-mono opacity-75">' + ref + "</td>" +
           "</tr>"
         );
@@ -862,8 +865,11 @@ async function loadOutbreakSurveillance() {
     }
   } catch (err) {
     summary.textContent = "Error";
-    grid.innerHTML = '<div class="text-xs text-rose-700">' + err.message + "</div>";
+    grid.innerHTML = '<div class="text-xs text-rose-700">' + escapeHtml(err.message) + "</div>";
   }
 }
 
+checkDatabase();
+loadSamples(null);
+loadServerReferences(null);
 loadOutbreakSurveillance();

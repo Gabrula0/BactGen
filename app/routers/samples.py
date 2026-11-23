@@ -29,13 +29,18 @@ async def _stream_to_disk(upload: UploadFile, dest_dir: Path) -> tuple[str, str]
             detail=f"Invalid file format ({filename}). Use .fastq.gz or .fq.gz files.",
         )
     dest_dir.mkdir(parents=True, exist_ok=True)
-    dest_path = dest_dir / filename
+    unique_filename = f"{uuid4().hex}_{filename}"
+    dest_path = dest_dir / unique_filename
     md5 = hashlib.md5()
 
-    with dest_path.open("wb") as out:
-        while chunk := await upload.read(1024 * 1024):
-            out.write(chunk)
-            md5.update(chunk)
+    try:
+        with dest_path.open("wb") as out:
+            while chunk := await upload.read(1024 * 1024):
+                out.write(chunk)
+                md5.update(chunk)
+    except Exception:
+        dest_path.unlink(missing_ok=True)
+        raise
 
     return dest_path.as_posix(), md5.hexdigest()
 
@@ -148,28 +153,54 @@ def attach_sequencing_run(
     return seq_run
 
 
-@router.post(
-    "/{sample_id}/sequencing-runs/upload",
-    response_model=SequencingRunResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def upload_sequencing_run(
-    sample_id: str,
-    platform: str = Form("Illumina MiSeq"),
-    r1_file: UploadFile = File(...),
-    r2_file: UploadFile | None = File(None),
-    db: Session = Depends(get_db),
-):
-    if not db.get(Sample, sample_id):
+@router.post("/analyses/upload-reference", status_code=status.HTTP_201_CREATED)
+async def upload_reference_fasta(fasta_file: UploadFile = File(...)):
+    filename = Path(fasta_file.filename or "").name
+    if (
+        not filename
+        or filename.startswith("-")
+        or not re.fullmatch(r"[A-Za-z0-9._-]+", filename)
+        or not filename.lower().endswith(REF_EXTS)
+    ):
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Sample '{sample_id}' not found.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Invalid reference filename or format. Use a .fasta, .fa, or .fna file "
+                "with only letters, numbers, '.', '_' or '-'."
+            ),
         )
 
-    r1_path, r1_md5 = await _stream_to_disk(r1_file, FASTQ_DIR)
-    r2_path = None
-    if r2_file and r2_file.filename:
-        r2_path, _ = await _stream_to_disk(r2_file, FASTQ_DIR)
+    first_chunk = await fasta_file.read(1024 * 1024)
+    header_probe = first_chunk.lstrip(b"\xef\xbb\xbf \t\r\n")
+    if not header_probe.startswith(b">"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid FASTA content: file must start with a '>' sequence header.",
+        )
+
+    REF_DIR.mkdir(parents=True, exist_ok=True)
+    dest_path = REF_DIR / filename
+    if dest_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Reference '{filename}' already exists. Use a unique versioned filename.",
+        )
+
+    try:
+        with dest_path.open("xb") as out:
+            out.write(first_chunk)
+            while chunk := await fasta_file.read(1024 * 1024):
+                out.write(chunk)
+    except FileExistsError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Reference '{filename}' already exists. Use a unique versioned filename.",
+        )
+    except Exception:
+        dest_path.unlink(missing_ok=True)
+        raise
+
+    return {"reference_path": dest_path.as_posix(), "filename": filename}
 
     seq_run = SequencingRun(
         sample_id=sample_id,

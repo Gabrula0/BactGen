@@ -10,7 +10,9 @@ process TYPING_AND_AMR {
 
     script:
     """
-    mlst ${contigs} > ${sample_id}.mlst.tsv
-    abricate --db ncbi ${contigs} > ${sample_id}.amr.tsv
+    set -euo pipefail
+
+    mlst "${contigs}" > "${sample_id}.mlst.tsv"
+    abricate --db ncbi "${contigs}" > "${sample_id}.amr.tsv"
     """
 }

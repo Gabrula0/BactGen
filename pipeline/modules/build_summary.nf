@@ -19,15 +19,17 @@ process BUILD_SUMMARY {
 
     script:
     """
+    set -euo pipefail
+
     build_summary.py \
-        --sample-id "${sample_id}" \
+        --sample-id '${sample_id}' \
         --fastp-json "${fastp_json}" \
         --flagstat "${flagstat_txt}" \
         --coverage "${coverage_tsv}" \
         --vcf "${vcf_gz}" \
         --mlst "${mlst_tsv}" \
         --amr "${amr_tsv}" \
-        --ref-name "${ref_name}" \
-        --outdir-abs "${outdir_abs}"
+        --ref-name '${ref_name}' \
+        --outdir-abs '${outdir_abs}'
     """
 }

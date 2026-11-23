@@ -1,12 +1,15 @@
+import hashlib
 import json
 import logging
 import subprocess
 from pathlib import Path
+from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models import AnalysisRun, GenomicResult, PairwiseDistance, SequencingRun, utcnow
+from app.schemas import SAMPLE_ID_PATTERN
 
 logger = logging.getLogger("bactgen.runner")
 
@@ -45,6 +48,27 @@ def _recalculate_pairwise_distances(
     current_snps: dict,
 ) -> None:
     """Calculates shared SNPs and genetic distance against other samples of the same reference genome."""
+    lock_id = int.from_bytes(
+        hashlib.sha256(reference_genome.encode("utf-8")).digest()[:8],
+        byteorder="big",
+        signed=True,
+    )
+    db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
+
+    newer_exists = (
+        db.query(AnalysisRun.analysis_id)
+        .join(SequencingRun, SequencingRun.run_id == AnalysisRun.run_id)
+        .filter(
+            SequencingRun.sample_id == current_sample_id,
+            AnalysisRun.reference_genome == reference_genome,
+            AnalysisRun.status == "SUCCESS",
+            AnalysisRun.analysis_id > current_analysis_id,
+        )
+        .first()
+    )
+    if newer_exists:
+        return
+
     other_rows = (
         db.query(SequencingRun.sample_id, AnalysisRun.analysis_id, GenomicResult.snp_positions)
         .join(AnalysisRun, AnalysisRun.run_id == SequencingRun.run_id)
@@ -59,14 +83,19 @@ def _recalculate_pairwise_distances(
         .all()
     )
 
-    set_curr = set(current_snps.items())
+    curr_dict = current_snps or {}
 
     for other_sample_id, other_analysis_id, other_snps in other_rows:
-        set_other = set((other_snps or {}).items())
-        shared_snps = len(set_curr & set_other)
-        snp_distance = len(set_curr ^ set_other)
+        other_dict = other_snps or {}
+        shared_snps = sum(
+            1 for pos, allele in curr_dict.items()
+            if other_dict.get(pos) == allele
+        )
+        snp_distance = sum(
+            1 for pos in (curr_dict.keys() | other_dict.keys())
+            if curr_dict.get(pos) != other_dict.get(pos)
+        )
 
-        # Cumplir CONSTRAINT ordered_sample_pair CHECK (sample_a_id < sample_b_id)
         if current_sample_id < other_sample_id:
             s_a, a_a = current_sample_id, current_analysis_id
             s_b, a_b = other_sample_id, other_analysis_id
@@ -96,6 +125,10 @@ def _recalculate_pairwise_distances(
                     "shared_snps": shared_snps,
                     "calculated_at": now,
                 },
+                where=(
+                    (PairwiseDistance.analysis_a_id <= a_a)
+                    & (PairwiseDistance.analysis_b_id <= a_b)
+                ),
             )
         )
         db.execute(stmt)
@@ -113,6 +146,13 @@ def execute_nextflow_analysis(analysis_id: int, reference_path: str, outdir: str
         if not seq_run:
             analysis.status = "FAILED"
             analysis.error_message = "SequencingRun asociado no encontrado."
+            analysis.finished_at = utcnow()
+            db.commit()
+            return
+
+        if not seq_run.sample_id or not SAMPLE_ID_PATTERN.match(seq_run.sample_id):
+            analysis.status = "FAILED"
+            analysis.error_message = f"Invalid sample_id format: {seq_run.sample_id!r}"
             analysis.finished_at = utcnow()
             db.commit()
             return

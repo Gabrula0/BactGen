@@ -18,6 +18,24 @@ services:
       timeout: 5s
       retries: 5
 
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: BactGen_api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://BactGen:BactGen_xD@db:5432/BactGenDB
+    ports:
+      - "8000:8000"
+    working_dir: ${PWD}
+    volumes:
+      - ${PWD}:${PWD}
+      - /var/run/docker.sock:/var/run/docker.sock
+
   pipeline-tools:
     build:
       context: .

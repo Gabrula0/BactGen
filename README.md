@@ -10,7 +10,7 @@ BactGen processes raw Illumina sequencing reads (`.fastq.gz`) through an automat
    Performs adapter trimming and base-quality filtering on raw reads while extracting core sequencing quality metrics, including raw and clean read counts and the Q30 base rate.
 
 2. **`MAP_AND_CALL` (`minimap2` + `samtools` + `bcftools`)**  
-   Aligns cleaned reads against the selected reference genome, computes mean sequencing depth and horizontal genome coverage, and executes haploid variant calling (`--ploidy 1`). Variants are filtered (`QUAL >= 30`, `DP >= 10`) to produce a high-confidence VCF file and a consensus sequence.
+   Aligns cleaned reads against the selected reference genome, computes mean sequencing depth and horizontal genome coverage, and executes haploid variant calling (`--ploidy 1`). Variants are filtered (`QUAL >= 30`, `DP >= 10`) to produce a high-confidence VCF file and a depth-masked consensus sequence.
 
 3. **`ASSEMBLE` (`MEGAHIT`)**  
    Performs *de novo* genome assembly from the cleaned reads, retaining contigs of at least `500 bp` to provide the sequence contiguity required for downstream typing and gene screening.
@@ -25,8 +25,8 @@ BactGen processes raw Illumina sequencing reads (`.fastq.gz`) through an automat
 
 ### Prerequisites
 
-* [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/)
-* Git
+- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/)
+- Git
 
 ### Installation & Startup
 
@@ -36,26 +36,32 @@ BactGen processes raw Illumina sequencing reads (`.fastq.gz`) through an automat
    cd BactGen
    ```
 
-2. **Build and start the services (first run or after modifying `Dockerfile` / dependencies):**
+2. **Build the bioinformatics tools image (`bactgen-tools:1.0`):**
+   ```bash
+   docker compose --profile tools build
+   ```
+   > `pipeline-tools` uses the `tools` profile so Nextflow can spawn short-lived `bactgen-tools:1.0` containers per pipeline step rather than keeping an idle container running.
+
+3. **Build and start the database and API services:**
    ```bash
    docker compose up -d --build
    ```
 
-3. **Daily startup (once the Docker image is already built):**
+4. **Daily startup (once the Docker images are already built):**
    ```bash
    docker compose up -d
    ```
 
-   Once running, open **`[http://127.0.0.1:8000/](http://127.0.0.1:8000/)`** in your browser.
+   Once running, open **`http://127.0.0.1:8000/`** in your browser.
 
 > **Data Persistence:** To stop the platform without losing registered samples, sequencing runs, or analysis results stored in PostgreSQL, run `docker compose stop`. Avoid using `docker compose down -v`, as the `-v` flag removes persistent database volumes.
 
 ### Bundled Reference Genomes
 
 BactGen includes three ready-to-use bacterial reference genomes in `data/reference/`:
-* `S_aureus_NCTC8325.fasta` (*Staphylococcus aureus*)
-* `E_coli_MG1655.fasta` (*Escherichia coli* K-12 MG1655)
-* `K_pneumoniae_HS11286.fasta` (*Klebsiella pneumoniae* HS11286)
+- `S_aureus_NCTC8325.fasta` (*Staphylococcus aureus*)
+- `E_coli_MG1655.fasta` (*Escherichia coli* K-12 MG1655)
+- `K_pneumoniae_HS11286.fasta` (*Klebsiella pneumoniae* HS11286)
 
 Additional `.fasta`, `.fa`, or `.fna` references can be placed directly in `data/reference/` or uploaded through the web interface.
 
@@ -79,7 +85,7 @@ Additional `.fasta`, `.fa`, or `.fna` references can be placed directly in `data
 
 ### REST API
 
-Interactive API documentation (Swagger UI) is available at **`[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)`**. Core endpoints include:
+Interactive API documentation (Swagger UI) is available at **`http://127.0.0.1:8000/docs`**. Core endpoints include:
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
@@ -100,9 +106,9 @@ BactGen follows a four-tier containerized architecture that decouples the clinic
 
 ```mermaid
 flowchart LR
-    UI["Web UI<br/>(HTML5 + Tailwind CSS + Vanilla JS)"] -->|REST / JSON & Multipart| API["FastAPI Backend<br/>(Routers, Pydantic, SQLAlchemy)"]
-    API -->|Reads / Writes| DB[("PostgreSQL<br/>Clinical & Genomic DB")]
-    API -->|Launches & Monitors| NF["Bioinformatics Pipeline<br/>(Nextflow / CLI Tools)"]
+    UI["Web UI<br/>(HTML5 + Tailwind CSS + Vanilla JS)"] -->|REST / JSON & Multipart| API["FastAPI Backend<br/>(Docker Service: Port 8000)"]
+    API -->|Reads / Writes| DB[("PostgreSQL<br/>(Docker Service: Port 5432)")]
+    API -->|Launches & Monitors| NF["Bioinformatics Pipeline<br/>(Nextflow -> bactgen-tools:1.0)"]
     NF -->|Reads FASTQ & Ref| FS[("Shared Storage<br/>data/fastq, data/reference")]
     NF -->|Writes summary.json, VCF, Consensus| RUNS[("Run Artifacts<br/>data/runs")]
     RUNS -->|Ingested on SUCCESS| API
@@ -116,8 +122,8 @@ flowchart LR
 2. **Application & Orchestration Layer (`app/`)**  
    Powered by **FastAPI** and **Pydantic** (`app/main.py`, `app/routers/`, `app/schemas.py`). It validates clinical and sequencing metadata, computes MD5 checksums on uploaded reads, dispatches pipeline executions asynchronously, parses the resulting `summary.json` into database records, and computes connected-component outbreak clusters from pairwise SNP distances.
 
-3. **Bioinformatics Execution Layer (`Nextflow` & CLI Suite)**  
-   Each analysis runs in an isolated working directory under `data/runs/`, executing `fastp`, `minimap2`, `samtools`, `bcftools`, `MEGAHIT`, `mlst`, and `ABRicate` against reference genomes stored in `data/reference/`.
+3. **Bioinformatics Execution Layer (`Nextflow` + `bactgen-tools:1.0`)**  
+   Each analysis runs in an isolated working directory under `data/runs/`, executing `fastp`, `minimap2`, `samtools`, `bcftools`, `MEGAHIT`, `mlst`, and `ABRicate` inside `bactgen-tools:1.0` containers against reference genomes stored in `data/reference/`.
 
 4. **Persistence Layer (`PostgreSQL` + Docker Volumes)**  
    **PostgreSQL** stores relational entities (`samples`, `sequencing_runs`, `analysis_runs`, `genomic_results`, and `pairwise_distances`) in a persistent Docker volume, while raw reads, reference FASTA files, and pipeline outputs reside on mounted host directories (`data/`).
